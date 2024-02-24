@@ -276,6 +276,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     //let current_dir = env::current_dir().unwrap();
     let exe_path = env::current_dir()?.join("cjxl.exe");
+    if !exe_path.exists() {
+        warn!("cjxl.exe not exists");
+        panic!("cjxl.exe not exists");
+    }
     info!("current cjxl.exe location: {:?}", exe_path);
     let begin_args: Vec<String> = std::env::args().collect();
     let path_pattern: &[_] = &['"', '\'']; //윈도우에서는 "로 경로를 감싸는 경우가 많아서, "를 제거함. 따옴표도 제거.
