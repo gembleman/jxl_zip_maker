@@ -48,13 +48,14 @@ jpg_args=[--distance=0,--effort=9,--lossless_jpeg=1]
 6. jpg_args : same.
 
 # note
-this program runs multiple jxl encoders, so the more cores there are in cpu, the more efficient.
-it recursively scans the working folder, so it doesn't matter how deep the image is in the working folder. exmple: workfolder/a_folder/b_foler/a.jpg is also convert.
-the zip file compression method is Stored. not LZMA, Deflare, std-z etc. because jxl file is already compressed. so meanless.
+this program runs multiple jxl encoders, so the more cores there are in cpu, the more efficient.  
+it recursively scans the working folder, so it doesn't matter how deep the image is in the working folder.  
+exmple) workfolder/a_folder/b_foler/a.jpg is also convert.  
+the zip file compression method is Stored. not LZMA, Deflare, std-z etc. because jxl file is already compressed. so meanless.  
 
 # why did I make it?
-i was inspired to create this program because I wanted to optimize hundreds of thousands of photos stored on my hard disk.
-hard disks have poor random access performance compared to SSDs, so when you have hundreds of thousands of small files, it's very slow to index and move them around.
-so the idea was to zip those small files together. And also to reduce the amount of storage.
-to me, the JXL format seemed like the best choice for storing lossless images.
-and... here's the result.
+i was inspired to create this program because I wanted to optimize hundreds of thousands of photos stored on my hard disk.  
+hard disks have poor random access performance compared to SSDs, so when you have hundreds of thousands of small files, it's very slow to index and move them around.  
+so the idea was to zip those small files together. And also to reduce the amount of storage.  
+to me, the JXL format seemed like the best choice for storing lossless images.  
+and... here's the result.  
