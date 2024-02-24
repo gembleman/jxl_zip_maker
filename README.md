@@ -40,7 +40,7 @@ dont_use_trashcan_just_delete=false
 png_args=[--distance=0,--effort=7]
 jpg_args=[--distance=0,--effort=9,--lossless_jpeg=1]
 ```
-1. delete_foler : true is delete, false is not.
+1. delete_folder : true is delete, false is not.
 2. delete_source_image : true is delete source image, false is not.
 3. make_zip : true is make zip file, false is not.
 4. dont_use_trashcan_just_delete : true is !!JUST DLETE IMAGE FILE!! so set it up when you expect to run out of disk space. false is image file throw trash can.
@@ -48,10 +48,10 @@ jpg_args=[--distance=0,--effort=9,--lossless_jpeg=1]
 6. jpg_args : same.
 
 # note
-this program runs multiple jxl encoders, so the more cores there are in cpu, the more efficient.  
-it recursively scans the working folder, so it doesn't matter how deep the image is in the working folder.  
-exmple) workfolder/a_folder/b_foler/a.jpg is also convert.  
-the zip file compression method is Stored. not LZMA, Deflare, std-z etc. because jxl file is already compressed. so meanless.  
+1. this program runs multiple jxl encoders, so the more cores there are in cpu, the more efficient.  
+2. it recursively scans the working folder, so it doesn't matter how deep the image is in the working folder. exmple) workfolder/a_folder/b_foler/a.jpg is also convert.  
+3. the zip file compression method is Stored. not LZMA, Deflare, std-z etc. because jxl file is already compressed. so meanless.  
+4. If any of the files in a folder are not successfully converted, the folder is not deleted and no archive is created.
 
 # why did I make it?
 i was inspired to create this program because I wanted to optimize hundreds of thousands of photos stored on my hard disk.  
