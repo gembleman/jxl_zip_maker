@@ -330,32 +330,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     let folder_list = WalkDirGeneric::<(usize, bool)>::new(&folder_path_input)
         .process_read_dir(|depth, path, read_dir_state, children| {
             children.retain(|dir_entry_result| {
-                let a = dir_entry_result.as_ref();
-                if let Ok(dir_entry) = a {
-                    if dir_entry.path().is_dir() && !dir_entry.path().with_extension("zip").exists()
-                    {
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
+                dir_entry_result.as_ref().map_or(false, |dir_entry| {
+                    dir_entry.path().is_dir() && !dir_entry.path().with_extension("zip").exists()
+                })
             })
         })
         .into_iter()
-        .filter_map(|e| match e {
-            Ok(e) => Some(e.path()),
-            Err(_) => panic!("Failed to read folder"),
-        })
+        .filter_map(|e| e.ok().map(|e| e.path()))
         .collect::<Vec<PathBuf>>(); //순서를 뒤집어서, 하위 폴더부터 변환하도록 함.
                                     // .into_iter()
                                     // .filter_map(|e| e.ok())
                                     // .filter(|e| e.path().is_dir() && !e.path().with_extension("zip").exists()) //zip 파일이 없는 폴더만 변환
                                     // .map(|e| e.into_path())
                                     // .collect();
-    info!("folder_list: {:?}", folder_list);
-    panic!("test");
 
     let zip_options = FileOptions::default()
         .compression_method(Stored)
