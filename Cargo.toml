@@ -15,3 +15,6 @@ md-5 = "0.10.6"
 rayon = "1.8.1"
 image = "0.24.9"
 trash = "3.3.1"
+
+[profile.release]
+lto = true
