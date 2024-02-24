@@ -1,3 +1,4 @@
+use core::panic;
 use fern::Dispatch;
 use log::{info, warn};
 use md5::{Digest, Md5};
@@ -12,10 +13,10 @@ use std::process::Command;
 // use walkdir::DirEntry;
 use chrono::Local;
 use image::io::Reader as ImageReader;
+use jwalk::WalkDirGeneric;
 use std::error::Error;
 use std::ffi::OsStr;
 use trash;
-use walkdir::WalkDir;
 use zip::write::FileOptions;
 use zip::CompressionMethod::Stored;
 use zip::ZipWriter;
@@ -326,13 +327,35 @@ fn main() -> Result<(), Box<dyn Error>> {
     //폴더 경로를 PathBuf로 변환
     // let mother_folder_path = PathBuf::from(user_input.trim().split('"').collect::<Vec<&str>>()[1]);
 
-    let folder_list: Vec<PathBuf> = WalkDir::new(folder_path_input)
-        .sort_by_file_name() //순서를 뒤집어서, 하위 폴더부터 변환하도록 함.
+    let folder_list = WalkDirGeneric::<(usize, bool)>::new(&folder_path_input)
+        .process_read_dir(|depth, path, read_dir_state, children| {
+            children.retain(|dir_entry_result| {
+                let a = dir_entry_result.as_ref();
+                if let Ok(dir_entry) = a {
+                    if dir_entry.path().is_dir() && !dir_entry.path().with_extension("zip").exists()
+                    {
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            })
+        })
         .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_dir() && !e.path().with_extension("zip").exists()) //zip 파일이 없는 폴더만 변환
-        .map(|e| e.into_path())
-        .collect();
+        .filter_map(|e| match e {
+            Ok(e) => Some(e.path()),
+            Err(_) => panic!("Failed to read folder"),
+        })
+        .collect::<Vec<PathBuf>>(); //순서를 뒤집어서, 하위 폴더부터 변환하도록 함.
+                                    // .into_iter()
+                                    // .filter_map(|e| e.ok())
+                                    // .filter(|e| e.path().is_dir() && !e.path().with_extension("zip").exists()) //zip 파일이 없는 폴더만 변환
+                                    // .map(|e| e.into_path())
+                                    // .collect();
+    info!("folder_list: {:?}", folder_list);
+    panic!("test");
 
     let zip_options = FileOptions::default()
         .compression_method(Stored)
@@ -395,7 +418,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         //error check
         for pack_file in &pack_files_list {
             if let Err(err) = pack_file {
-                warn!("{}", err);
+                warn!("{}\npass this folder", err);
                 can_i_make_zip_file = false;
                 delete_folder_plag = false;
                 break;
