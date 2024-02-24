@@ -282,7 +282,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     info!("current cjxl.exe location: {:?}", exe_path);
     let begin_args: Vec<String> = std::env::args().collect();
-    let path_pattern: &[_] = &['"', '\'']; //윈도우에서는 "로 경로를 감싸는 경우가 많아서, "를 제거함. 따옴표도 제거.
+    let path_pattern = ['"', '\'']; //윈도우에서는 "로 경로를 감싸는 경우가 많아서, "를 제거함. 따옴표도 제거.
     let folder_path_input = if begin_args.len() > 1 {
         begin_args[1].clone() // 첫번째 인자로 폴더 경로를 받음.
     } else {
@@ -297,14 +297,23 @@ fn main() -> Result<(), Box<dyn Error>> {
                 continue;
             }
 
-            let folder_path_input = user_input.trim().trim_matches(path_pattern).to_string();
-            let folder_path = PathBuf::from(&folder_path_input);
-
-            if folder_path.exists() && folder_path.is_dir() {
-                break folder_path_input;
-            } else {
-                warn!("Folder path is not valid. Please enter again: ");
-                user_input.clear();
+            //let folder_path_input = user_input.trim().trim_matches(path_pattern).to_string();
+            let folder_path_input = path_pattern.into_iter().find_map(|c| {
+                let split: Vec<&str> = user_input.split(c).collect();
+                if split.len() > 1 && !split[1].is_empty() {
+                    Some(split[1].to_string())
+                } else {
+                    None
+                }
+            });
+            match folder_path_input {
+                Some(path) if PathBuf::from(&path).is_dir() => {
+                    break path;
+                }
+                _ => {
+                    warn!("Folder path is not valid. Please enter again: ");
+                    user_input.clear();
+                }
             }
         }
     };
