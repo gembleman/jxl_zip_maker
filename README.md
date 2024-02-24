@@ -52,6 +52,7 @@ jpg_args=[--distance=0,--effort=9,--lossless_jpeg=1]
 2. it recursively scans the working folder, so it doesn't matter how deep the image is in the working folder. exmple) workfolder/a_folder/b_foler/a.jpg is also convert.  
 3. the zip file compression method is Stored. not LZMA, Deflare, std-z etc. because jxl file is already compressed. so meanless.  
 4. If any of the files in a folder are not successfully converted, the folder is not deleted and no archive is created.
+5. If you have a jxl file and an image file with the same name, generate a numbered jxl file from the image file and compare both jxl files. If their MD5 hashes are the same, the existing jxl file is deleted. If they are different, both files are kept.
 
 # why did I make it?
 i was inspired to create this program because I wanted to optimize hundreds of thousands of photos stored on my hard disk.  
