@@ -7,7 +7,6 @@ a program that converts PNG and JPG files to JXL and packs them into a ZIP file.
 2. you can customize your own settings for each image file format.
 3. can make zip file.
 4. It's free from dependency. When the jxl encoder(cjxl.exe) is updated, just replace it.
-5. written in Rust(?)
 
 # how to use?
 just run and drop work folder or give argument before run
