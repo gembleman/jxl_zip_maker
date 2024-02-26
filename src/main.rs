@@ -1,7 +1,6 @@
 use core::panic;
 use fern::Dispatch;
 use log::{info, warn};
-use md5::{Digest, Md5};
 use rayon::prelude::*;
 use std::env;
 use std::fs;
@@ -11,16 +10,24 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
 // use walkdir::DirEntry;
+use bincode;
 use chrono::Local;
+use hex;
 use image::io::Reader as ImageReader;
 use jwalk::WalkDirGeneric;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::error::Error;
 use std::ffi::OsStr;
+use std::hash::BuildHasherDefault;
 use trash;
+use xxhash_rust::xxh3::xxh3_64;
+use xxhash_rust::xxh3::Xxh3;
 use zip::write::FileOptions;
 use zip::CompressionMethod::Stored;
 use zip::ZipWriter;
-
+type XxHashMap<K, V> = HashMap<K, V, BuildHasherDefault<Xxh3>>;
+use std::time::Instant;
 fn setup_logger() -> Result<(), fern::InitError> {
     let file_log = Dispatch::new()
         .format(|out, message, record| {
@@ -146,7 +153,16 @@ fn image_to_jxl(
 
     //jxl 파일이 이미 존재하면, 파일 해시를 확인해 일치하는 파일은 삭제..
     if number > 0 {
-        let new_jxl_hash = finalize_md5(&new_jxl_path)?.finalize();
+        //let new_jxl_hash = finalize_md5(&new_jxl_path)?.finalize();
+        let new_jxl_hash = finalize_xxhash(&new_jxl_path)
+            .map_err(|err| {
+                format!(
+                    "Failed to finalize_xxhash: {}\nerror message: {}",
+                    new_jxl_path.display(),
+                    err
+                )
+            })
+            .unwrap();
 
         for i in (0..number).rev() {
             let compare_path = if i == 0 {
@@ -161,7 +177,15 @@ fn image_to_jxl(
                     i
                 ))
             };
-            let compare_jxl_hash = finalize_md5(&compare_path)?.finalize();
+            let compare_jxl_hash = finalize_xxhash(&compare_path)
+                .map_err(|err| {
+                    format!(
+                        "Failed to finalize_xxhash: {}\nerror message: {}",
+                        compare_path.display(),
+                        err
+                    )
+                })
+                .unwrap();
 
             if new_jxl_hash != compare_jxl_hash {
                 warn!(
@@ -179,13 +203,11 @@ fn image_to_jxl(
     Ok(())
 }
 
-fn finalize_md5(file_path: &PathBuf) -> Result<Md5, String> {
+fn finalize_xxhash(file_path: &PathBuf) -> Result<u64, String> {
     let mut file = File::open(file_path).expect("Failed to open file");
     let mut buffer = vec![];
     file.read_to_end(&mut buffer).expect("Failed to read file");
-    let mut hasher = Md5::new();
-    hasher.update(&buffer);
-    Ok(hasher)
+    Ok(xxh3_64(&buffer))
 }
 
 fn is_image_file(path: &PathBuf) -> Result<image::ImageFormat, String> {
@@ -196,7 +218,7 @@ fn is_image_file(path: &PathBuf) -> Result<image::ImageFormat, String> {
         .expect("hey, i don't get ext str")
         .to_lowercase();
 
-    if ["jpg", "png"].contains(&file_ext.as_str()) {
+    if ["jpg", "png", "jpeg"].contains(&file_ext.as_str()) {
         //이미지 포맷 확인
         let img_format = ImageReader::open(path)
             .expect("Failed to open image file")
@@ -223,7 +245,11 @@ fn is_image_file(path: &PathBuf) -> Result<image::ImageFormat, String> {
         )) //"The file is not image"
     }
 }
-
+//TODO
+//1. 따옴표가 없는 줄도 경로 알아채기. - 보류.
+//2. 폴더 스캔에 걸리는 시간 측정. - Done.
+//3. 작업 내역을 생성 및 저장 및 읽기로 이미 작업을 마친 폴더는 건너뛰기. - Done.
+//4. md5 해시가 아닌, xxhash로 이미지 해시값 생성. - Done.
 fn main() -> Result<(), Box<dyn Error>> {
     setup_logger()?;
     //cjxl_args 불러오기.
@@ -241,18 +267,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             text_file.write_all(b"delete_folder=false\ndelete_source_image=false\nmake_zip=true\ndont_use_trashcan_just_delete=false\npng_args=[--distance=0,--effort=7]\njpg_args=[--distance=0,--effort=9,--lossless_jpeg=1]")?;
 
             warn!("Failed to read cjxl_args.ini");
-            JxlArgs {
-                delete_folder_plag: false,
-                delete_source_image_plag: false,
-                make_zip_plag: true,
-                dont_use_trashcan_just_delete: false,
-                png_args: vec!["--distance=0".to_string(), "--effort=7".to_string()],
-                jpg_args: vec![
-                    "--distance=0".to_string(),
-                    "--effort=9".to_string(),
-                    "--lossless_jpeg=1".to_string(),
-                ],
-            }
+            let mut jxl_args = JxlArgs::default();
+            jxl_args.png_args = vec!["--distance=0".to_string(), "--effort=7".to_string()];
+            jxl_args.jpg_args = vec![
+                "--distance=0".to_string(),
+                "--effort=9".to_string(),
+                "--lossless_jpeg=1".to_string(),
+            ];
+            jxl_args
         }
     };
 
@@ -319,30 +341,74 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
+    let work_folder_hex = hex::encode(xxh3_64(folder_path_input.as_bytes()).to_be_bytes());
+
+    //작업 내역이 있으면, 작업 내역을 불러옴.
+    let mut work_info = match File::open(format!("{}.bin", work_folder_hex)) {
+        Ok(file) => {
+            info!("Worklist file exists so load worklist.");
+            bincode::deserialize_from(file).expect("Failed to load worklist")
+        }
+        Err(_) => {
+            info!("No worklist file so create new worklist.");
+            WorkInfo::new(folder_path_input.clone(), cjxl_args.clone())
+        }
+    };
+
     //작업 시간 측정
-    let start = Local::now();
+    let start = Instant::now();
 
     //폴더 경로를 가져옴
     // let folder_path_input = user_input.trim().split('"').nth(1).unwrap_or_default();
     //폴더 경로를 PathBuf로 변환
     // let mother_folder_path = PathBuf::from(user_input.trim().split('"').collect::<Vec<&str>>()[1]);
 
-    let folder_list = WalkDirGeneric::<(usize, bool)>::new(&folder_path_input)
+    // ...
+    let mut folder_list = WalkDirGeneric::<(usize, bool)>::new(&folder_path_input)
         .process_read_dir(|depth, path, read_dir_state, children| {
+            //작업 내역이 있으면, 작업 내역을 불러옴.
             children.retain(|dir_entry_result| {
                 dir_entry_result.as_ref().map_or(false, |dir_entry| {
-                    dir_entry.path().is_dir() && !dir_entry.path().with_extension("zip").exists()
+                    if dir_entry.path().is_dir() {
+                        true
+                    } else {
+                        false
+                    }
                 })
-            })
+            });
         })
         .into_iter()
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .collect::<Vec<PathBuf>>(); //순서를 뒤집어서, 하위 폴더부터 변환하도록 함.
-                                    // .into_iter()
-                                    // .filter_map(|e| e.ok())
-                                    // .filter(|e| e.path().is_dir() && !e.path().with_extension("zip").exists()) //zip 파일이 없는 폴더만 변환
-                                    // .map(|e| e.into_path())
-                                    // .collect();
+        .filter_map(|dir_result| match dir_result {
+            Ok(entry) => {
+                let path = entry.path();
+                match work_info.worklist.get(&path) {
+                    Some(&true) => {
+                        info!("Already done: {}", path.display());
+                        None
+                    }
+                    Some(&false) => Some(path),
+                    None => {
+                        work_info.worklist.insert(path.clone(), false);
+                        Some(path)
+                    }
+                }
+            }
+            Err(_) => None,
+        })
+        .collect::<Vec<PathBuf>>();
+
+    let file_search_duration = start.elapsed();
+    let (fs_hours, fs_minutes, fs_seconds, fs_milliseconds) = time_display(file_search_duration);
+    info!(
+        "File search time:{:02}:{:02}:{:02}:{:03}",
+        fs_hours, fs_minutes, fs_seconds, fs_milliseconds
+    );
+
+    //하위 폴더부터 변환하기 위해 폴더 리스트를 정렬.
+    folder_list.sort_by(|a, b| {
+        //components().count()는 폴더의 깊이를 나타냄.
+        b.components().count().cmp(&a.components().count())
+    });
 
     let zip_options = FileOptions::default()
         .compression_method(Stored)
@@ -356,7 +422,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut delete_folder_plag = cjxl_args.delete_folder_plag;
         let mut can_i_make_zip_file = cjxl_args.make_zip_plag;
 
-        let pack_files_list: Vec<Result<PathBuf, String>> = PathBuf::from(&folder_path)
+        let pack_files_list: Vec<Result<JXL, String>> = PathBuf::from(&folder_path)
             .read_dir()?
             .filter_map(Result::ok)
             .filter(|entry| entry.path().is_file() && entry.path().extension().unwrap() != "zip")
@@ -382,14 +448,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     trash::delete(&entry.path()).expect("Failed to delete file33");
                                 }
                             }
-                            Ok(jxl_path)
+                            Ok(JXL::Converted(jxl_path))
                         }
                         Err(err) => Err(err),
                     }
                 }
                 Err(err) => {
                     if err.contains("This file is skip") {
-                        Ok(entry.path())
+                        Ok(JXL::ExistFromBegin(entry.path()))
                     } else {
                         Err(err)
                     }
@@ -399,6 +465,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         if pack_files_list.is_empty() {
             info!("No image file in folder");
+            work_info.update_list_element(&folder_path);
             continue;
         }
 
@@ -414,12 +481,27 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         if !can_i_make_zip_file {
             //파일 하나라도 이미지 변환에 실패하는 경우, zip 파일을 만들지 않음.
+            //또는 사용자가 zip 파일을 만들지 않겠다고 설정한 경우.
             info!("Do not make zip file");
+            work_info.update_list_element(&folder_path);
             continue;
         }
 
         //zip 파일 만들기 - png, jpg를 포함한 모든 이미지 파일을 zip으로 묶음.
-        let pack_files_list: Vec<_> = pack_files_list.into_iter().filter_map(Result::ok).collect();
+        let pack_files_list: Vec<_> = pack_files_list
+            .into_iter()
+            .filter_map({
+                |pack_file| match pack_file {
+                    Ok(JXL::Converted(jxl_path)) => Some(jxl_path),
+                    Ok(JXL::ExistFromBegin(jxl_path)) => Some(jxl_path),
+                    Err(err) => {
+                        //not use this line, but still keep it.
+                        warn!("{}\npass this folder", err);
+                        None
+                    }
+                }
+            })
+            .collect();
         let _ = make_zip(&folder_path, zip_options, pack_files_list);
 
         if delete_folder_plag {
@@ -430,14 +512,27 @@ fn main() -> Result<(), Box<dyn Error>> {
                 trash::delete(&folder_path)?;
             }
         }
+
+        //work_info.worklist[&folder_path] = true;//why rust not allow IndexMut????
+        //work_info 업데이트
+        work_info.update_list_element(&folder_path);
     }
-    let end = Local::now();
+
+    //작업 리스트 저장.
+    let mut file = File::create(format!("{}.bin", work_folder_hex))?;
+    bincode::serialize_into(&mut file, &work_info)?;
+
     info!("All done!");
-    let duration_time = end - start;
-    let hours = duration_time.num_hours();
-    let minutes = duration_time.num_minutes() % 60;
-    let seconds = duration_time.num_seconds() % 60;
-    info!("Duration time:{:02}:{:02}:{:02}", hours, minutes, seconds);
+    let duration_time = start.elapsed();
+    let (hours, minutes, seconds, milliseconds) = time_display(duration_time);
+    info!(
+        "Duration time:{:02}:{:02}:{:02}.{:03}",
+        hours, minutes, seconds, milliseconds
+    );
+    info!(
+        "File search time:{:02}:{:02}:{:02}.{:03}",
+        fs_hours, fs_minutes, fs_seconds, fs_milliseconds
+    );
 
     println!("Press Enter to exit...");
     io::stdin().read_line(&mut String::new())?;
@@ -497,6 +592,16 @@ fn read_cjxl_args() -> Result<JxlArgs, String> {
     Ok(jxlargs)
 }
 
+fn time_display(duration_time: std::time::Duration) -> (u128, u128, u128, u128) {
+    let milliseconds = duration_time.as_millis();
+    let hours = milliseconds / 3_600_000;
+    let minutes = milliseconds % 3_600_000 / 60_000;
+    let seconds = milliseconds % 60_000 / 1_000;
+    let milliseconds = milliseconds % 1_000;
+    (hours, minutes, seconds, milliseconds)
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct JxlArgs {
     delete_folder_plag: bool,
     delete_source_image_plag: bool,
@@ -504,4 +609,45 @@ struct JxlArgs {
     dont_use_trashcan_just_delete: bool,
     png_args: Vec<String>,
     jpg_args: Vec<String>,
+}
+impl Default for JxlArgs {
+    fn default() -> Self {
+        JxlArgs {
+            delete_folder_plag: false,
+            delete_source_image_plag: false,
+            make_zip_plag: true,
+            dont_use_trashcan_just_delete: false,
+            png_args: vec![],
+            jpg_args: vec![],
+        }
+    }
+}
+
+enum JXL {
+    ExistFromBegin(PathBuf),
+    Converted(PathBuf),
+}
+
+#[derive(Serialize, Deserialize)]
+struct WorkInfo {
+    work_folder_path: String,
+    work_setting: JxlArgs,
+    worklist: XxHashMap<PathBuf, bool>,
+}
+impl WorkInfo {
+    fn new(work_folder_path: String, work_setting: JxlArgs) -> Self {
+        WorkInfo {
+            work_folder_path,
+            work_setting,
+            worklist: XxHashMap::default(),
+        }
+    }
+
+    fn update_list_element(&mut self, folder_path: &PathBuf) {
+        if let Some(value) = self.worklist.get_mut(folder_path) {
+            *value = true;
+        } else {
+            panic!("Failed to update worklist");
+        }
+    }
 }
